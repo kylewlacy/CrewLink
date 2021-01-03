@@ -9,15 +9,13 @@ import './hook';
 import { initializeIpcHandlers, initializeIpcListeners } from './ipc-handlers';
 import { IpcRendererMessages } from '../common/ipc-messages';
 import { ProgressInfo } from 'builder-util-runtime';
-import log from 'electron-log';
+import * as log from 'electron-log';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
-const logDate = new Date();
 log.transports.file.resolvePath = (variables, message) => {
-	const logFilename = logDate.toISOString().replace(/:/g, "-");
-	return joinPath(__dirname, '..', '..', '_local', 'logs', `${logFilename}.log`);
-}
+	return joinPath(__dirname, '..', '..', '_local', 'logs', 'index.log');
+};
 log.transports.file.maxSize = 0;
 
 // global reference to mainWindow (necessary to prevent window from being garbage collected)
