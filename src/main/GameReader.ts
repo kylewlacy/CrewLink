@@ -16,6 +16,7 @@ import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import offsetStore, { IOffsets } from './offsetStore';
 import Errors from '../common/Errors';
+import * as log from 'electron-log';
 
 interface ValueType<T> {
 	read(buffer: BufferSource, offset: number): T;
@@ -140,7 +141,7 @@ export default class GameReader {
 				this.gameAssembly.modBaseAddr,
 				offsets.gameState
 			);
-
+			let gameStateString;
 			switch (gameState) {
 				case 0:
 					state = GameState.MENU;
@@ -292,6 +293,7 @@ export default class GameReader {
 			};
 			const stateHasChanged = !equal(this.lastState, newState);
 			if (stateHasChanged) {
+				log.info("Game state changed", newState);
 				try {
 					this.sendIPC(IpcRendererMessages.NOTIFY_GAME_STATE_CHANGED, newState);
 				} catch (e) {

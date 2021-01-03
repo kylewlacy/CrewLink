@@ -17,6 +17,7 @@ import Grid from '@material-ui/core/Grid';
 import makeStyles from '@material-ui/core/styles/makeStyles';
 import SupportLink from './SupportLink';
 import Divider from '@material-ui/core/Divider';
+import * as log from 'electron-log';
 
 export interface ExtendedAudioElement extends HTMLAudioElement {
 	setSinkId: (sinkId: string) => Promise<void>;
@@ -87,30 +88,44 @@ function calculateVoiceAudio(
 	gain: GainNode,
 	pan: PannerNode
 ): void {
+	log.info(`[calculateVoiceAudio] Caculating for ${me.name} and ${other.name}`);
+
 	const audioContext = pan.context;
 	pan.positionZ.setValueAtTime(-0.5, audioContext.currentTime);
 	let panPos = [other.x - me.x, other.y - me.y];
+	log.info("  [calculateVoiceAudio] panPos initial:", panPos);
 	if (
 		state.gameState === GameState.DISCUSSION ||
 		(state.gameState === GameState.LOBBY && !settings.enableSpatialAudio)
 	) {
+		log.info("  [calculateVoiceAudio] spatial audio disabled, resetting panPos");
 		panPos = [0, 0];
 	}
-	if (isNaN(panPos[0])) panPos[0] = 999;
-	if (isNaN(panPos[1])) panPos[1] = 999;
+	if (isNaN(panPos[0])) {
+		log.info("  [calculateVoiceAudio] panPos[0] is NaN");
+		panPos[0] = 999;
+	}
+	if (isNaN(panPos[1])) {
+		log.info("  [calculateVoiceAudio] panPos[1] is NaN", panPos);
+		panPos[1] = 999;
+	}
 	panPos[0] = Math.min(999, Math.max(-999, panPos[0]));
 	panPos[1] = Math.min(999, Math.max(-999, panPos[1]));
+	log.info("  [calculateVoiceAudio] panPos normalized:", panPos);
 	if (other.inVent) {
+		log.info("  [calculateVoiceAudio] in vent");
 		gain.gain.value = 0;
 		return;
 	}
 	if (me.isDead && other.isDead) {
+		log.info("  [calculateVoiceAudio] both players are dead");
 		gain.gain.value = 1;
 		pan.positionX.setValueAtTime(panPos[0], audioContext.currentTime);
 		pan.positionY.setValueAtTime(panPos[1], audioContext.currentTime);
 		return;
 	}
 	if (!me.isDead && other.isDead) {
+		log.info("  [calculateVoiceAudio] other player is dead");
 		gain.gain.value = 0;
 		return;
 	}
@@ -118,22 +133,27 @@ function calculateVoiceAudio(
 		state.gameState === GameState.LOBBY ||
 		state.gameState === GameState.DISCUSSION
 	) {
+		log.info("  [calculateVoiceAudio] lobby/discussion");
 		gain.gain.value = 1;
 		pan.positionX.setValueAtTime(panPos[0], audioContext.currentTime);
 		pan.positionY.setValueAtTime(panPos[1], audioContext.currentTime);
 	} else if (state.gameState === GameState.TASKS) {
+		log.info("  [calculateVoiceAudio] tasks");
 		gain.gain.value = 1;
 		pan.positionX.setValueAtTime(panPos[0], audioContext.currentTime);
 		pan.positionY.setValueAtTime(panPos[1], audioContext.currentTime);
 	} else {
+		log.info("  [calculateVoiceAudio] disabled gain state");
 		gain.gain.value = 0;
 	}
 	if (
 		gain.gain.value === 1 &&
 		Math.sqrt(Math.pow(panPos[0], 2) + Math.pow(panPos[1], 2)) > 7
 	) {
+		log.info("  [calculateVoiceAudio] players are too far away");
 		gain.gain.value = 0;
 	}
+	log.info("  [calculateVoiceAudio] final gain value", gain.gain.value);
 }
 
 export interface VoiceProps {
@@ -226,6 +246,7 @@ const Voice: React.FC<VoiceProps> = function ({
 	const [mutedState, setMuted] = useState(false);
 	const [connected, setConnected] = useState(false);
 	function disconnectPeer(peer: string) {
+		log.info(`Disconnect peer: ${peer}`);
 		const connection = peerConnections[peer];
 		if (!connection) {
 			return;
@@ -252,6 +273,7 @@ const Voice: React.FC<VoiceProps> = function ({
 	// Emit lobby settings to connected peers
 	useEffect(() => {
 		if (gameState.isHost !== true) return;
+		log.info("Sending lobby settings to peers...");
 		Object.values(peerConnections).forEach((peer) => {
 			try {
 				peer.send(JSON.stringify(settings.localLobbySettings));
@@ -262,6 +284,7 @@ const Voice: React.FC<VoiceProps> = function ({
 	}, [settings.localLobbySettings]);
 
 	useEffect(() => {
+		log.info("Setting max distance");
 		for (const peer in audioElements.current) {
 			audioElements.current[peer].pan.maxDistance = lobbySettings.maxDistance;
 		}
@@ -285,6 +308,7 @@ const Voice: React.FC<VoiceProps> = function ({
 	// Set dead player data
 	useEffect(() => {
 		if (gameState.gameState === GameState.LOBBY) {
+			log.info("Setting dead player data (lobby, no dead)");
 			setOtherDead({});
 		} else if (gameState.gameState !== GameState.TASKS) {
 			if (!gameState.players) return;
@@ -292,7 +316,9 @@ const Voice: React.FC<VoiceProps> = function ({
 				for (const player of gameState.players) {
 					old[player.id] = player.isDead || player.disconnected;
 				}
-				return { ...old };
+				const newDead = { ...old };
+				log.info("Setting dead player data", newDead);
+				return newDead;
 			});
 		}
 	}, [gameState.gameState]);
@@ -307,20 +333,24 @@ const Voice: React.FC<VoiceProps> = function ({
 	useEffect(() => {
 		let currentLobby = '';
 		// Connect to voice relay server
+		log.info("Connecting to voice relay server...");
 		connectionStuff.current.socket = io(settings.serverURL, {
 			transports: ['websocket'],
 		});
 		const { socket } = connectionStuff.current;
 
 		socket.on('error', (error: SocketError) => {
+			log.info("Socket error", error);
 			if (error.message) {
 				setError(error.message);
 			}
 		});
 		socket.on('connect', () => {
+			log.info("Socket connected", error);
 			setConnected(true);
 		});
 		socket.on('disconnect', () => {
+			log.info("Socket disconnected", error);
 			setConnected(false);
 		});
 
@@ -347,12 +377,14 @@ const Voice: React.FC<VoiceProps> = function ({
 				stream.getAudioTracks()[0].enabled = !settings.pushToTalk;
 
 				ipcRenderer.on(IpcRendererMessages.TOGGLE_DEAFEN, () => {
+					log.info("Toggle deafen");
 					connectionStuff.current.deafened = !connectionStuff.current.deafened;
 					stream.getAudioTracks()[0].enabled =
 						!connectionStuff.current.deafened && !connectionStuff.current.muted;
 					setDeafened(connectionStuff.current.deafened);
 				});
 				ipcRenderer.on(IpcRendererMessages.TOGGLE_MUTE, () => {
+					log.info("Toggle mute");
 					connectionStuff.current.muted = !connectionStuff.current.muted;
 					if (connectionStuff.current.deafened) {
 						connectionStuff.current.deafened = false;
@@ -366,6 +398,7 @@ const Voice: React.FC<VoiceProps> = function ({
 				ipcRenderer.on(
 					IpcRendererMessages.PUSH_TO_TALK,
 					(_: unknown, pressing: boolean) => {
+						log.info("Push to talk");
 						if (!connectionStuff.current.pushToTalk) return;
 						if (!connectionStuff.current.deafened) {
 							stream.getAudioTracks()[0].enabled = pressing;
@@ -376,8 +409,14 @@ const Voice: React.FC<VoiceProps> = function ({
 				const ac = new AudioContext();
 				ac.createMediaStreamSource(stream);
 				audioListener = VAD(ac, ac.createMediaStreamSource(stream), undefined, {
-					onVoiceStart: () => setTalking(true),
-					onVoiceStop: () => setTalking(false),
+					onVoiceStart: () => {
+						log.info("VAD onVoiceStart");
+						setTalking(true);
+					},
+					onVoiceStop: () => {
+						log.info("VAD onVoiceStop");
+						setTalking(false);
+					},
 					noiseCaptureDuration: 1,
 					stereo: false,
 				});
@@ -389,20 +428,23 @@ const Voice: React.FC<VoiceProps> = function ({
 					playerId: number,
 					clientId: number
 				) => {
-					console.log('Connect called', lobbyCode, playerId, clientId);
+					log.info('Connect called', lobbyCode, playerId, clientId);
 					if (lobbyCode === 'MENU') {
+						log.info('Went to menu, so disconnecting');
 						Object.keys(peerConnections).forEach((k) => {
 							disconnectPeer(k);
 						});
 						setSocketClients({});
 						currentLobby = lobbyCode;
 					} else if (currentLobby !== lobbyCode) {
+						log.info('Joining lobby');
 						socket.emit('join', lobbyCode, playerId, clientId);
 						currentLobby = lobbyCode;
 					}
 				};
 				setConnect({ connect });
 				function createPeerConnection(peer: string, initiator: boolean) {
+					log.info(`Creating peer connection (initiator ${initiator}), peer:`, peer);
 					const connection = new Peer({
 						stream,
 						initiator,
@@ -422,8 +464,10 @@ const Voice: React.FC<VoiceProps> = function ({
 					let errCode: PeerErrorCode;
 
 					connection.on('connect', () => {
+						log.info("Connection connected");
 						if (gameState.isHost) {
 							try {
+								log.info("Host, sending lobby settings", lobbySettingsRef.current);
 								connection.send(JSON.stringify(lobbySettingsRef.current));
 							} catch (e) {
 								console.warn('failed to update lobby settings: ', e);
@@ -454,8 +498,14 @@ const Voice: React.FC<VoiceProps> = function ({
 						pan.connect(gain);
 						// Source -> pan -> gain -> VAD -> destination
 						VAD(context, gain, context.destination, {
-							onVoiceStart: () => setTalking(true),
-							onVoiceStop: () => setTalking(false),
+							onVoiceStart: () => {
+								log.info("Peer VAD onVoiceStart", peer);
+								setTalking(true)
+							},
+							onVoiceStop: () => {
+								log.info("Peer VAD onVoiceStop", peer);
+								setTalking(false)
+							},
 							stereo: settingsRef.current.enableSpatialAudio,
 						});
 
@@ -477,6 +527,7 @@ const Voice: React.FC<VoiceProps> = function ({
 					connection.on('data', (data) => {
 						if (gameState.hostId !== socketClientsRef.current[peer]?.clientId)
 							return;
+						log.info("connection data (from host)", data);
 						const settings = JSON.parse(data);
 						Object.keys(lobbySettings).forEach((field: string) => {
 							if (field in settings) {
@@ -488,7 +539,7 @@ const Voice: React.FC<VoiceProps> = function ({
 						});
 					});
 					connection.on('close', () => {
-						console.log('Disconnected from', peer, 'Initiator:', initiator);
+						log.info('connection close', peer, initiator, errCode);
 						disconnectPeer(peer);
 
 						// Auto reconnect on connection error
@@ -499,6 +550,7 @@ const Voice: React.FC<VoiceProps> = function ({
 							(errCode == 'ERR_CONNECTION_FAILURE' ||
 								errCode == 'ERR_DATA_CHANNEL')
 						) {
+							log.info('trying auto reconnect...');
 							createPeerConnection(peer, initiator);
 							retries++;
 						}
@@ -506,6 +558,7 @@ const Voice: React.FC<VoiceProps> = function ({
 					return connection;
 				}
 				socket.on('join', async (peer: string, client: Client) => {
+					log.info('socket join', peer, client);
 					createPeerConnection(peer, true);
 					setSocketClients((old) => ({ ...old, [peer]: client }));
 				});
@@ -539,6 +592,7 @@ const Voice: React.FC<VoiceProps> = function ({
 		);
 
 		return () => {
+			log.info("leave");
 			socket.emit('leave');
 			Object.keys(peerConnections).forEach((k) => {
 				disconnectPeer(k);

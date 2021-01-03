@@ -9,8 +9,16 @@ import './hook';
 import { initializeIpcHandlers, initializeIpcListeners } from './ipc-handlers';
 import { IpcRendererMessages } from '../common/ipc-messages';
 import { ProgressInfo } from 'builder-util-runtime';
+import log from 'electron-log';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
+
+const logDate = new Date();
+log.transports.file.resolvePath = (variables, message) => {
+	const logFilename = logDate.toISOString().replace(/:/g, "-");
+	return joinPath(__dirname, '..', '..', '_local', 'logs', `${logFilename}.log`);
+}
+log.transports.file.maxSize = 0;
 
 // global reference to mainWindow (necessary to prevent window from being garbage collected)
 let mainWindow: BrowserWindow | null;
@@ -68,6 +76,7 @@ function createMainWindow() {
 			})
 		);
 	}
+	crewlinkVersion = '1.2.1';
 	window.webContents.userAgent = `CrewLink/${crewlinkVersion} (${process.platform})`;
 
 	window.on('closed', () => {
